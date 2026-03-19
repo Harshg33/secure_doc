@@ -24,7 +24,7 @@ app = FastAPI(title="SecureDoc AI", version="1.0.0")
 # Allow frontend to talk to backend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://securedoc.vercel.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

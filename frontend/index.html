@@ -123,6 +123,32 @@
   .sources-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
   .source-tag { font-size: 10.5px; padding: 2px 8px; border-radius: 10px; background: var(--card); border: 1px solid var(--border); color: var(--muted); }
 
+  .feedback-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+  .feedback-btn { background: none; border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; font-size: 12px; cursor: pointer; color: var(--muted); transition: all 0.15s; font-family: var(--font); }
+  .feedback-btn:hover { border-color: var(--success); color: var(--success); }
+  .feedback-btn.voted { background: var(--success-soft); border-color: var(--success); color: var(--success); cursor: default; pointer-events:none; }
+  .feedback-btn.down:hover { border-color: var(--danger); color: var(--danger); }
+  .cache-badge { font-size: 10px; padding: 2px 7px; border-radius: 10px; background: rgba(240,165,60,0.13); color: var(--gold); border: 1px solid rgba(240,165,60,0.3); margin-left:6px; }
+
+  .admin-panel { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 200; display: none; align-items: center; justify-content: center; padding: 20px; }
+  .admin-panel.open { display: flex; }
+  .admin-card { background: var(--card); border: 1px solid var(--border-bright); border-radius: 16px; width: 100%; max-width: 780px; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; }
+  .admin-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+  .admin-header h2 { font-size: 16px; font-weight: 500; }
+  .admin-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 14px 20px; border-bottom: 1px solid var(--border); }
+  .stat-box { background: var(--surface); border-radius: 8px; padding: 10px 14px; }
+  .stat-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .stat-val { font-size: 22px; font-weight: 500; }
+  .admin-table-wrap { flex: 1; overflow-y: auto; padding: 14px 20px; }
+  .admin-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .admin-table th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  .admin-table td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: top; line-height: 1.5; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .admin-table tr:last-child td { border-bottom: none; }
+  .liked-row td { background: rgba(62,207,142,0.04); }
+  .admin-footer { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; gap: 10px; }
+  .admin-btn { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer; font-family: var(--font); color: var(--text); transition: all 0.15s; }
+  .admin-btn:hover { border-color: var(--border-bright); }
+
   .typing-dots { display: flex; gap: 4px; align-items: center; padding: 4px 0; }
   .typing-dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: bounce 1.2s ease-in-out infinite; }
   .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
@@ -207,7 +233,7 @@
       <div class="header-logo">🔐</div>
       <span class="header-title">SecureDoc AI</span>
     </div>
-    <div style="display:flex;align-items:center;gap:10px">
+    <div style="display:flex;align-items:center;gap:10px" id="header-right">
       <div id="access-indicator" class="role-badge"></div>
       <div class="user-pill" onclick="logout()">
         <div class="user-avatar" id="user-avatar"></div>
@@ -259,7 +285,7 @@
 </div>
 
 <script>
-const API = 'https://secure-doc-t4kp.onrender.com';
+const API = 'http://localhost:8000';
 
 let authToken = null;
 let currentUser = null;
@@ -347,6 +373,17 @@ async function enterApp() {
 
   const hints = { admin: '🔓 Full access — all docs in context', hr: '👥 HR access — public + HR docs', public: '🔒 Public docs only' };
   document.getElementById('hint-access-msg').textContent = hints[currentUser.role] || '';
+
+  // Show admin button for admin role
+  const headerRight = document.getElementById('header-right');
+  if (currentUser.role === 'admin') {
+    const adminBtn = document.createElement('button');
+    adminBtn.className = 'admin-btn';
+    adminBtn.style.cssText = 'font-size:12px;padding:5px 10px;border-radius:8px;';
+    adminBtn.textContent = '🎟️ Tickets';
+    adminBtn.onclick = openAdmin;
+    headerRight.insertBefore(adminBtn, headerRight.firstChild);
+  }
 
   await loadDocuments();
 }
@@ -449,7 +486,7 @@ async function sendMessage() {
 
     const data = await res.json();
     chatHistory.push({ role: 'assistant', content: data.reply });
-    appendMessage('bot', data.reply, false, data.sources || []);
+    appendMessage('bot', data.reply, false, data.sources || [], data.ticket_id, data.from_cache, chatHistory[chatHistory.length-2]?.content, data.match_type);
 
   } catch (e) {
     typingEl.remove();
@@ -460,11 +497,10 @@ async function sendMessage() {
   }
 }
 
-function appendMessage(role, text, _unused, sources) {
+function appendMessage(role, text, _unused, sources, ticketId, fromCache, question, matchType) {
   const messages = document.getElementById('messages');
   const wrap = document.createElement('div');
   wrap.className = `msg ${role}`;
-
   const senderName = role === 'user' ? (currentUser?.display_name || 'You') : 'SecureDoc AI';
 
   let sourcesHtml = '';
@@ -472,12 +508,81 @@ function appendMessage(role, text, _unused, sources) {
     sourcesHtml = `<div class="sources-row">${sources.map(s => `<span class="source-tag">${s.icon} ${s.name}</span>`).join('')}</div>`;
   }
 
+  let feedbackHtml = '';
+  if (role === 'bot' && ticketId) {
+    const matchLabel = matchType === 'exact' ? '🎯 Exact cache hit' : '⚡ Fuzzy cache hit';
+    const cacheTag = fromCache ? `<span class="cache-badge">${matchLabel}</span>` : '';
+    feedbackHtml = `
+      <div class="feedback-row">
+        <button class="feedback-btn" id="up-${ticketId}" onclick="sendFeedback(${ticketId}, '${escHtml(question||'')}', this)">👍 Helpful</button>
+        <button class="feedback-btn down" onclick="this.closest('.feedback-row').innerHTML='<span style=\'font-size:11px;color:var(--muted)\'>Thanks for your feedback</span>'">👎</button>
+        ${cacheTag}
+      </div>`;
+  }
+
   wrap.innerHTML = `
     <div class="msg-sender">${senderName}</div>
-    <div class="msg-bubble">${escHtml(text).replace(/\n/g,'<br>')}${sourcesHtml}</div>`;
+    <div class="msg-bubble">${escHtml(text).replace(/\n/g,'<br>')}${sourcesHtml}${feedbackHtml}</div>`;
   messages.appendChild(wrap);
   messages.scrollTop = messages.scrollHeight;
   return wrap;
+}
+
+async function sendFeedback(ticketId, question, btn) {
+  btn.disabled = true;
+  try {
+    const res = await fetch(`${API}/feedback/thumbsup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify({ ticket_id: ticketId, question, answer: '', sources: [] }),
+    });
+    if (res.ok) {
+      btn.classList.add('voted');
+      btn.textContent = '👍 Saved to cache!';
+    }
+  } catch(e) { btn.disabled = false; }
+}
+
+async function loadAdminData() {
+  try {
+    const res = await fetch(`${API}/admin/tickets`, { headers: { 'X-Auth-Token': authToken } });
+    if (!res.ok) return;
+    const data = await res.json();
+    const s = data.stats;
+    document.getElementById('admin-stats').innerHTML = `
+      <div class="stat-box"><div class="stat-label">Total tickets</div><div class="stat-val">${s.total_tickets}</div></div>
+      <div class="stat-box"><div class="stat-label">👍 Cached responses</div><div class="stat-val" style="color:var(--success)">${s.liked_tickets}</div></div>
+      <div class="stat-box"><div class="stat-label">By role</div><div class="stat-val" style="font-size:13px;line-height:1.8">${Object.entries(s.by_role).map(([k,v])=>`${k}: ${v}`).join('<br>')}</div></div>`;
+    const tbody = document.getElementById('admin-tbody');
+    tbody.innerHTML = data.tickets.slice().reverse().map(t => `
+      <tr class="${parseInt(t.thumbs_up)>0?'liked-row':''}">
+        <td>${t.id}</td>
+        <td style="color:var(--muted)">${t.timestamp.split(' ')[1]||t.timestamp}</td>
+        <td>${t.username}</td>
+        <td><span class="role-badge badge-${t.role}">${t.role}</span></td>
+        <td title="${escHtml(t.question)}">${escHtml(t.question.substring(0,60))}${t.question.length>60?'…':''}</td>
+        <td style="color:var(--muted)" title="${escHtml(t.answer)}">${escHtml(t.answer.substring(0,80))}${t.answer.length>80?'…':''}</td>
+        <td style="text-align:center">${parseInt(t.thumbs_up)>0?'👍 '+t.thumbs_up:'-'}</td>
+      </tr>`).join('');
+  } catch(e) { console.error(e); }
+}
+
+function openAdmin() {
+  document.getElementById('admin-panel').classList.add('open');
+  loadAdminData();
+}
+
+function closeAdmin() {
+  document.getElementById('admin-panel').classList.remove('open');
+}
+
+async function downloadCSV() {
+  const res = await fetch(`${API}/admin/tickets/download`, { headers: { 'X-Auth-Token': authToken } });
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'tickets.csv';
+  a.click();
 }
 
 function appendTyping() {
@@ -506,5 +611,26 @@ function escHtml(str) { return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').re
 function handleKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }
 function autoResize(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 100) + 'px'; }
 </script>
+
+<!-- Admin Panel -->
+<div class="admin-panel" id="admin-panel" onclick="if(event.target===this)closeAdmin()">
+  <div class="admin-card">
+    <div class="admin-header">
+      <h2>🎟️ Ticket Cache Dashboard</h2>
+      <button class="modal-close" onclick="closeAdmin()">✕</button>
+    </div>
+    <div class="admin-stats" id="admin-stats"></div>
+    <div class="admin-table-wrap">
+      <table class="admin-table">
+        <thead><tr><th>#</th><th>Time</th><th>User</th><th>Role</th><th>Question</th><th>Answer</th><th>👍</th></tr></thead>
+        <tbody id="admin-tbody"></tbody>
+      </table>
+    </div>
+    <div class="admin-footer">
+      <button class="admin-btn" onclick="downloadCSV()">⬇️ Download CSV</button>
+      <button class="admin-btn" onclick="loadAdminData()">🔄 Refresh</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
